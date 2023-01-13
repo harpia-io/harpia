@@ -1,0 +1,811 @@
+version: '3.9'
+
+services:
+  tempo:
+    image: grafana/tempo:latest
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./configs/tempo/tempo.yaml:/etc/tempo.yaml
+      - 'tempo_data:/tmp/tempo'
+    ports:
+      - "14268:14268"  # jaeger ingest
+      - "3200:3200"   # tempo
+      - "4317:4317"  # otlp grpc
+      - "4318:4318"  # otlp http
+      - "9411:9411"   # zipkin
+
+  mariadb:
+    image: docker.io/bitnami/mariadb:latest
+    volumes:
+      - 'mariadb_data:/bitnami/mariadb'
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - MARIADB_ROOT_USER=harpia
+      - MARIADB_ROOT_PASSWORD=harpia
+    healthcheck:
+      test: ['CMD', '/opt/bitnami/scripts/mariadb/healthcheck.sh']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+
+  mariadb-exporter:
+    image: quay.io/prometheus/mysqld-exporter
+    command:
+     - -collect.info_schema.tablestats
+    environment:
+      - DATA_SOURCE_NAME=exporter:exporter@(mariadb:3306)/
+    links:
+      - mariadb
+    depends_on:
+      - mariadb
+
+  mysql-client:
+    container_name: mysql-client
+    image: imega/mysql-client:latest
+    volumes:
+      - './scripts/:/tmp'
+    command: >
+        sh -c "/tmp/prepare_database.sh client_db_template.sql"
+
+  zookeeper:
+    image: docker.io/bitnami/zookeeper:3.6.3
+    volumes:
+      - "zookeeper_data:/bitnami"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  kafka:
+    image: docker.io/bitnami/kafka:3.3.1
+    ports:
+      - "9092:9092"
+    volumes:
+      - "kafka_data:/bitnami"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  kafka-lag-exporter:
+    image: docker.io/seglo/kafka-lag-exporter:0.8.2
+    volumes:
+      - './configs/kafkalag:/opt/docker/conf'
+    environment:
+      - KAFKA_LAG_EXPORTER_CLUSTERS.0.name=kafka
+      - KAFKA_LAG_EXPORTER_CLUSTERS.0.bootstrap-brokers=kafka:9092
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  aerospike:
+    image: aerospike/aerospike-server:latest
+    volumes:
+      - 'aerospike_data:/opt/aerospike/data'
+    ports:
+      - "3000:3000"
+      - "3002:3002"
+    environment:
+      - NAMESPACE=harpia
+      - MEM_GB=1
+      - STORAGE_DB=1
+      - AGENT_LOG_LEVEL=warn
+      - DATA_IN_MEMORY=true
+      - DEFAULT_TTL=1825d
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  harp-actions:
+    image: theharpia/harp-actions:v1.0.15
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - POD_NAME=harp-actions
+      - SERVICE_NAME=harp-actions
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-actions
+      - NAMESPACE=harpia
+      - LOG_LEVEL=DEBUG
+      - DBUSER=harpia
+      - DBPASS=harpia
+      - DBHOST=mariadb
+      - DBPORT=3306
+      - DBSCHEMA=harpia_db
+      - ENVIRONMENTS_HOST=harp-environments:8081/harp-environments
+      - BRIDGE_HOST=harp-bridge:8081/harp-bridge
+      - SCENARIOS_HOST=http://harp-scenarios:8081/harp-scenarios/api/v1/scenarios
+      - USERS_HOST=harp-users:8081/harp-users
+      - TEMPO_URL=http://tempo:4317
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-collectors:
+    image: theharpia/harp-collectors:v2.0.8
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - POD_NAME=harp-collectors
+      - SERVICE_NAME=harp-collectors
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-collectors
+      - NAMESPACE=harpia
+      - LOG_LEVEL=DEBUG
+      - KAFKA_SERVERS=kafka:9092
+      - EVENTS_TOPIC=collector-notifications
+      - CREATE_NOTIFICATION_ICINGA_TOPIC=create-notifications-icinga
+      - CREATE_NOTIFICATION_ZABBIX_TOPIC=create-notifications-zabbix
+      - TEMPO_URL=http://tempo:4317
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-environments:
+    image: theharpia/harp-environments:v1.0.1
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+
+      - POD_NAME=harp-environments
+      - SERVICE_NAME=harp-environments
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-environments
+      - NAMESPACE=harpia
+
+      - KAFKA_SERVERS=kafka:9092
+      - ENVIRONMENT_UPDATE_TOPIC=environment-update
+      - USERS_HOST=http://harp-users:8081/harp-users/api/v1/users
+      - SCENARIOS_HOST=http://harp-scenarios:8081/harp-scenarios/api/v1/scenarios
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-daemon:
+    image: theharpia/harp-daemon:v2.0.27
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+
+      - AEROSPIKE_HOST=aerospike
+      - AEROSPIKE_PORT=3000
+      - AEROSPIKE_NAMESPACE=harpia
+
+      - POD_NAME=harp-daemon
+      - SERVICE_NAME=harp-daemon
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-daemon
+      - NAMESPACE=harpia
+
+      - REQUESTS_CACHE_EXPIRE_SECONDS=300
+      - SCENARIOS_HOST=http://harp-scenarios:8081/harp-scenarios/api/v1/scenarios
+      - ENVIRONMENTS_HOST=http://harp-environments:8081/harp-environments/api/v1/environments
+      - NOTIFICATION_SERVICE_SMS=http://harp-notifications-sms:8081/harp-notifications-sms/api/v1/notifications/sms
+      - NOTIFICATION_SERVICE_VOICE=http://harp-notifications-voice:8081/harp-notifications-voice/api/v1/notifications/voice
+      - NOTIFICATION_SERVICE_WHATSAPP=http://harp-notifications-whatsapp:8081/harp-notifications-whatsapp/api/v1/notifications/whatsapp
+      - LICENSE_SERVICE=http://harp-licenses:8081/harp-licenses/api/v1/licenses/verify
+
+      - KAFKA_SERVERS=kafka:9092
+      - KAFKA_CONSUMER_THREADS=5
+      - COLLETOR_NOTIFICATIONS_TOPIC=collector-notifications-decorated
+      - RESOLVE_NOTIFICATIONS_TOPIC=resolve-notifications
+      - ENV_DELETION_TOPIC=environment-update
+
+      - SMTP_ACTIVE=true
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=465
+
+      - JIRA_ACTIVE=true
+      - JIRA_HOST=''
+      - JIRA_USER=''
+      - JIRA_PASS=''
+      - JIRA_TIMEOUT=15
+      - JIRA_TEMP_FILES=''
+
+      - TELEGRAM_ACTIVE=true
+      - TELEGRAM_TEMP_FILES=/tmp
+
+      - TEAMS_ACTIVE=true
+
+      - PAGERDUTY_ACTIVE=true
+      - PAGERDUTY_ENDPOINT=https://events.pagerduty.com/v2/enqueue
+
+      - SMS_ACTIVE=true
+      - VOICE_ACTIVE=true
+      - CHECK_ALERT_STATE_FLAPPING=true
+      - DEEP_REPORTING=true
+      - TEMPO_URL=http://tempo:4317
+      - IGNORE_ALL_MESSAGES=false
+
+      - GMAIL_SERVICE=http://harp-notifications-gmail:8081/harp-notifications-gmail/api/v1/notifications/gmail
+      - SMS_SERVICE=http://harp-notifications-sms:8081/harp-notifications-sms/api/v1/notifications/sms
+      - VOICE_SERVICE=http://harp-notifications-voice:8081/harp-notifications-voice/api/v1/notifications/voice
+      - TEAMS_SERVICE=http://harp-notifications-msteams:8081/harp-notifications-msteams/api/v1/notifications/teams
+      - TELEGRAM_SERVICE=http://harp-notifications-telegram:8081/harp-notifications-telegram/api/v1/notifications/telegram
+      - SLACK_SERVICE=http://harp-notifications-slack:8081/harp-notifications-slack/api/v1/notifications/slack
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+      - DOCKER_SERVER_IP=${HOST_IP}
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-users:
+    image: theharpia/harp-users:v1.0.7
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+
+      - AEROSPIKE_HOST=aerospike
+      - AEROSPIKE_PORT=3000
+      - AEROSPIKE_NAMESPACE=harpia
+
+      - POD_NAME=harp-users
+      - SERVICE_NAME=harp-users
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-users
+      - NAMESPACE=harpia
+
+      - KAFKA_SERVERS=kafka:9092
+      - ENVIRONMENT_UPDATE_TOPIC=environment-update
+      - ENVIRONMENTS_HOST=http://harp-environments:8081/harp-environments
+      - TOKEN_EXPIRE_HOURS=720
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=465
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+      - DOCKER_SERVER_IP=${HOST_IP}
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-licenses:
+    image: theharpia/harp-licenses:v1.0.1
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+
+      - POD_NAME=harp-licenses
+      - SERVICE_NAME=harp-licenses
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-licenses
+      - NAMESPACE=harpia
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-aggregator:
+    image: theharpia/harp-aggregator:v1.0.7
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - DBHOST=mariadb
+      - DBUSER=harpia
+      - DBPASS=harpia
+      - DBSCHEMA=harpia_db
+
+      - POD_NAME=harp-aggregator
+      - SERVICE_NAME=harp-aggregator
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-aggregator
+      - NAMESPACE=harpia
+
+      - ENVIRONMENTS_HOST=harp-environments:8081/harp-environments
+      - AEROSPIKE_HOST=aerospike
+      - AEROSPIKE_PORT=3000
+      - AEROSPIKE_NAMESPACE=harpia
+      - UPDATE_AEROSPIKE_SECONDS=10
+      - UPDATE_ENVIRONMENTS_SECONDS=60
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-bridge:
+    image: theharpia/harp-bridge:v1.0.2
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-bridge
+      - SERVICE_NAME=harp-bridge
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-bridge
+      - NAMESPACE=harpia
+
+      - AEROSPIKE_HOST=aerospike
+      - AEROSPIKE_PORT=3000
+      - AEROSPIKE_NAMESPACE=harpia
+
+      - CLIENT_NOTIFICATION_PERIOD_SECONDS=20
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-scenarios:
+    image: theharpia/harp-scenarios:v1.0.3
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-scenarios
+      - SERVICE_NAME=harp-scenarios
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-scenarios
+      - NAMESPACE=harpia
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-clientevents:
+    image: theharpia/harp-clientevents:v1.0.1
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-clientevents
+      - SERVICE_NAME=harp-clientevents
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-clientevents
+      - NAMESPACE=harpia
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-alert-decorator:
+    image: theharpia/harp-alert-decorator:v2.0.4
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-alert-decorator
+      - SERVICE_NAME=harp-alert-decorator
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-alert-decorator
+      - NAMESPACE=harpia
+
+      - KAFKA_SERVERS=kafka:9092
+      - NOTIFICATIONS_TOPIC=collector-notifications
+      - NOTIFICATIONS_DECORATED_TOPIC=collector-notifications-decorated
+      - SCENARIOS_HOST=http://harp-scenarios:8081/harp-scenarios/api/v1/scenarios
+      - ENVIRONMENTS_HOST=http://harp-environments:8081/harp-environments/api/v1/environments
+      - INTEGRATIONS_HOST=http://harp-integrations:8081/harp-integrations/api/v1/integrations
+      - REQUESTS_CACHE_EXPIRE_SECONDS=60
+      - UNASSIGNED_SCENARIO_ID=1
+      - UNASSIGNED_ENV_ID=1
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-ui:
+    image: theharpia/harp-ui:v1.1.18
+    restart: on-failure
+    environment:
+      - POD_NAME=harp-ui
+      - DOMAIN=http://${HOST_IP}
+      - GRAFANA_REPORTS=http://${HOST_IP}/grafana
+      - NAMESPACE=harpia
+      - SHOW_SIDE_PANEL=true
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-integrations:
+    image: theharpia/harp-integrations:v1.0.1
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-integrations
+      - SERVICE_NAME=harp-integrations
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-integrations
+      - NAMESPACE=harpia
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-bots:
+    image: theharpia/harp-bots:v1.0.4
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-bots
+      - SERVICE_NAME=harp-bots
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-bots
+      - NAMESPACE=harpia
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-voice:
+    image: theharpia/harp-notifications-voice:v1.0.3
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+      - TEMPO_URL=http://tempo:4317
+
+      - POD_NAME=harp-notifications-voice
+      - SERVICE_NAME=harp-notifications-voice
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-voice
+      - NAMESPACE=harpia
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-sms:
+    image: theharpia/harp-notifications-sms:v1.0.2
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+      - TEMPO_URL=http://tempo:4317
+
+      - POD_NAME=harp-notifications-sms
+      - SERVICE_NAME=harp-notifications-sms
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-sms
+      - NAMESPACE=harpia
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-gmail:
+    image: theharpia/harp-notifications-gmail:v1.0.5
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-notifications-gmail
+      - SERVICE_NAME=harp-notifications-gmail
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-gmail
+      - NAMESPACE=harpia
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+      - GMAIL_HOST=smtp.gmail.com
+      - GMAIL_PORT=465
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-telegram:
+    image: theharpia/harp-notifications-telegram:v1.0.5
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+      - TEMPO_URL=http://tempo:4317
+
+      - POD_NAME=harp-notifications-telegram
+      - SERVICE_NAME=harp-notifications-telegram
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-telegram
+      - NAMESPACE=harpia
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-slack:
+    image: theharpia/harp-notifications-slack:v1.0.6
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+      - TEMPO_URL=http://tempo:4317
+
+      - POD_NAME=harp-notifications-slack
+      - SERVICE_NAME=harp-notifications-slack
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-slack
+      - NAMESPACE=harpia
+
+      - BOTS_SERVICE=http://harp-bots:8081/harp-bots/api/v1/bots
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-notifications-msteams:
+    image: theharpia/harp-notifications-msteams:v1.0.5
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+      - TEMPO_URL=http://tempo:4317
+
+      - POD_NAME=harp-notifications-msteams
+      - SERVICE_NAME=harp-notifications-msteams
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-notifications-msteams
+      - NAMESPACE=harpia
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  harp-filters:
+    image: theharpia/harp-filters:v1.0.4
+    restart: on-failure
+    environment:
+      - LOKI_SERVER=loki
+      - LOKI_PORT=3100
+      - LOG_LEVEL=DEBUG
+
+      - POD_NAME=harp-filters
+      - SERVICE_NAME=harp-filters
+      - SERVICE_NAMESPACE=harpia
+      - URL_PREFIX=/harp-filters
+      - NAMESPACE=harpia
+
+      - DATABASE_SERVER=mariadb
+      - DATABASE_USER=harpia
+      - DATABASE_PSWD=harpia
+      - DATABASE_SCHEMA=harpia_db
+
+      - KAFKA_SERVERS=kafka:9092
+      - NOTIFICATIONS_DECORATED_TOPIC=collector-notifications-decorated
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - "grafana_data:/data/loki"
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/log:/var/log
+    command: -config.file=/etc/promtail/config.yml
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    pull_policy: always
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - "grafana_data:/var/lib/grafana"
+      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=harpia_2022
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_DATABASE_TYPE=mysql
+      - GF_DATABASE_HOST=mariadb
+      - GF_DATABASE_NAME=grafana
+      - GF_DATABASE_USER=grafana
+      - GF_DATABASE_PASSWORD=grafana
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_ALERTING_ENABLED=false
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_FEATURE_TOGGLES_ENABLE=tempoApmTable,tempoSearch,tempoBackendSearch
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    pull_policy: always
+
+  vmagent:
+    container_name: vmagent
+    image: victoriametrics/vmagent:latest
+    depends_on:
+      - "victoriametrics"
+    volumes:
+      -  vmagentdata_data:/vmagentdata
+      -  ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+    restart: always
+
+  victoriametrics:
+    container_name: victoriametrics
+    image: victoriametrics/victoria-metrics:latest
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoriametrics_data:/storage
+    command:
+      - "--storageDataPath=/storage"
+      - "--graphiteListenAddr=:2003"
+      - "--opentsdbListenAddr=:4242"
+      - "--httpListenAddr=:8428"
+      - "--influxListenAddr=:8089"
+    restart: always
+
+  nginx:
+      restart: unless-stopped
+      image: nginx:latest
+      ports:
+          - "80:80"
+          - "443:443"
+      volumes:
+          - ./configs/nginx:/etc/nginx
+          - /etc/letsencrypt/archive/harpia.io:/tmp
+          - ./configs/assets:/var/www/html
+      deploy:
+        restart_policy:
+          condition: on-failure
+          delay: 5s
+      pull_policy: always
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/blackbox/blackbox.yml"
+    volumes:
+      - ./configs/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+
+volumes:
+  mariadb_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  kafka_data:
+    driver: local
+  aerospike_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+  vmagentdata_data:
+    driver: local
+  victoriametrics_data:
+    driver: local
+  tempo_data:
+    driver: local

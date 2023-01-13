@@ -1,0 +1,155 @@
+global:
+  scrape_interval:     30s
+
+scrape_configs:
+  - job_name: 'mariadb'
+    static_configs:
+         - targets: ['mariadb-exporter:9104']
+
+  - job_name: 'harp-actions'
+    static_configs:
+         - targets: ['harp-actions:8081']
+
+  - job_name: 'harp-collectors'
+    static_configs:
+         - targets: ['harp-collectors:8081']
+
+  - job_name: 'harp-environments'
+    static_configs:
+         - targets: ['harp-environments:8081']
+
+  - job_name: 'harp-daemon'
+    static_configs:
+         - targets: ['harp-daemon:8081']
+
+  - job_name: 'harp-users'
+    static_configs:
+         - targets: ['harp-users:8081']
+
+  - job_name: 'harp-licenses'
+    static_configs:
+         - targets: ['harp-licenses:8081']
+
+  - job_name: 'harp-aggregator'
+    static_configs:
+         - targets: ['harp-aggregator:8081']
+
+  - job_name: 'harp-bridge'
+    static_configs:
+         - targets: ['harp-bridge:8081']
+
+  - job_name: 'harp-scenarios'
+    static_configs:
+         - targets: ['harp-scenarios:8081']
+
+  - job_name: 'harp-clientevents'
+    static_configs:
+         - targets: ['harp-clientevents:8081']
+
+  - job_name: 'harp-alert-decorator'
+    static_configs:
+         - targets: ['harp-alert-decorator:8081']
+
+  - job_name: 'harp-integrations'
+    static_configs:
+         - targets: ['harp-integrations:8081']
+
+  - job_name: 'harp-bots'
+    static_configs:
+         - targets: ['harp-bots:8081']
+
+  - job_name: 'harp-filters'
+    static_configs:
+         - targets: ['harp-filters:8081']
+
+  - job_name: 'harp-notifications-voice'
+    static_configs:
+         - targets: ['harp-notifications-voice:8081']
+
+  - job_name: 'harp-notifications-sms'
+    static_configs:
+         - targets: ['harp-notifications-sms:8081']
+
+  - job_name: 'harp-notifications-gmail'
+    static_configs:
+         - targets: ['harp-notifications-gmail:8081']
+
+  - job_name: 'kafka-lag-exporter'
+    static_configs:
+      - targets: [ 'kafka-lag-exporter:8000' ]
+
+  - job_name: 'harp-notifications-msteams'
+    static_configs:
+         - targets: ['harp-notifications-msteams:8081']
+
+  - job_name: 'harp-notifications-slack'
+    static_configs:
+         - targets: ['harp-notifications-slack:8081']
+
+  - job_name: 'harp-notifications-telegram'
+    static_configs:
+         - targets: ['harp-notifications-telegram:8081']
+
+  - job_name: 'blackbox-exporter-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://harp-filters:8081/harp-filters/health
+        - http://harp-notifications-voice:8081/harp-notifications-voice/health
+        - http://harp-notifications-sms:8081/harp-notifications-sms/health
+        - http://harp-actions:8081/harp-actions/health
+        - http://harp-collectors:8081/harp-collectors/health
+        - http://harp-environments:8081/harp-environments/health
+        - http://harp-daemon:8081/harp-daemon/health
+        - http://harp-users:8081/harp-users/health
+        - http://harp-licenses:8081/harp-licenses/health
+        - http://harp-aggregator:8081/harp-aggregator/health
+        - http://harp-bridge:8081/harp-bridge/health
+        - http://harp-scenarios:8081/harp-scenarios/health
+        - http://harp-clientevents:8081/harp-clientevents/health
+        - http://harp-alert-decorator:8081/harp-alert-decorator/health
+        - http://harp-integrations:8081/harp-integrations/health
+        - http://harp-bots:8081/harp-bots/health
+        - http://loki:3100/metrics
+        - http://harp-notifications-gmail:8081/harp-notifications-gmail/health
+        - http://harp-notifications-msteams:8081/harp-notifications-msteams/health
+        - http://harp-notifications-slack:8081/harp-notifications-slack/health
+        - http://harp-notifications-telegram:8081/harp-notifications-telegram/health
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      - source_labels: [ instance ]
+        separator: '/'
+        regex: 'http://(.*):8081/(.*)/(.*)'
+        replacement: '${1}'
+        target_label: service
+
+  - job_name: 'blackbox-exporter-tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+        - mariadb:3306
+        - zookeeper:2181
+        - kafka:9092
+        - aerospike:3000
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      - source_labels: [ instance ]
+        separator: ':'
+        regex: '(.*):(.*)'
+        replacement: '${1}'
+        target_label: datastore
