@@ -31,7 +31,7 @@ Official Roadmap 2023 you can find here - https://github.com/orgs/harpia-io/proj
 
 ## Platform Architecture
 
-![harp-architecture.drawio.svg](harp-architecture.drawio.svg)
+![harp-architecture.drawio.svg](harp-architecture.jpg)
 
 ### Technical flow to process alerts
 - [harp-collectors](https://github.com/harpia-io/harp-collectors): receive alerts from monitoring system, unify the structure and push them to Kafka topic
