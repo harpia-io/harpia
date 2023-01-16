@@ -138,7 +138,7 @@ services:
     pull_policy: always
 
   harp-collectors:
-    image: theharpia/harp-collectors:v2.0.8
+    image: theharpia/harp-collectors:v2.0.10
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -190,7 +190,7 @@ services:
     pull_policy: always
 
   harp-daemon:
-    image: theharpia/harp-daemon:v2.0.27
+    image: theharpia/harp-daemon:v2.0.30
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -457,7 +457,7 @@ services:
     pull_policy: always
 
   harp-ui:
-    image: theharpia/harp-ui:v1.1.18
+    image: theharpia/harp-ui:v1.1.20
     restart: on-failure
     environment:
       - POD_NAME=harp-ui
