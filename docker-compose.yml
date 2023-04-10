@@ -138,7 +138,7 @@ services:
     pull_policy: always
 
   harp-collectors:
-    image: theharpia/harp-collectors:v2.0.10
+    image: theharpia/harp-collectors:v2.0.11
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -190,7 +190,7 @@ services:
     pull_policy: always
 
   harp-daemon:
-    image: theharpia/harp-daemon:v2.0.30
+    image: theharpia/harp-daemon:v2.0.32
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -428,7 +428,7 @@ services:
     pull_policy: always
 
   harp-alert-decorator:
-    image: theharpia/harp-alert-decorator:v2.0.4
+    image: theharpia/harp-alert-decorator:v2.0.5
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -520,7 +520,7 @@ services:
     pull_policy: always
 
   harp-notifications-voice:
-    image: theharpia/harp-notifications-voice:v1.0.3
+    image: theharpia/harp-notifications-voice:v1.0.4
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -542,7 +542,7 @@ services:
     pull_policy: always
 
   harp-notifications-sms:
-    image: theharpia/harp-notifications-sms:v1.0.2
+    image: theharpia/harp-notifications-sms:v1.0.3
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -564,7 +564,7 @@ services:
     pull_policy: always
 
   harp-notifications-gmail:
-    image: theharpia/harp-notifications-gmail:v1.0.5
+    image: theharpia/harp-notifications-gmail:v1.0.6
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -587,7 +587,7 @@ services:
     pull_policy: always
 
   harp-notifications-telegram:
-    image: theharpia/harp-notifications-telegram:v1.0.5
+    image: theharpia/harp-notifications-telegram:v1.0.6
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -609,7 +609,7 @@ services:
     pull_policy: always
 
   harp-notifications-slack:
-    image: theharpia/harp-notifications-slack:v1.0.6
+    image: theharpia/harp-notifications-slack:v1.0.7
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
@@ -631,7 +631,7 @@ services:
     pull_policy: always
 
   harp-notifications-msteams:
-    image: theharpia/harp-notifications-msteams:v1.0.5
+    image: theharpia/harp-notifications-msteams:v1.0.6
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
