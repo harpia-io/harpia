@@ -190,7 +190,7 @@ services:
     pull_policy: always
 
   harp-daemon:
-    image: theharpia/harp-daemon:v2.0.32
+    image: theharpia/harp-daemon:v2.0.33
     restart: on-failure
     environment:
       - LOKI_SERVER=loki
